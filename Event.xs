@@ -21,12 +21,6 @@ struct info {
 };
 
 static void
-event_timer_cb (pe_event *pe)
-{
-  *(int *)(pe->up->ext_data) = -1;
-}
-
-static void
 event_io_cb (pe_event *pe)
 {
   U16 got = ((pe_ioevent *)pe)->got;
@@ -50,8 +44,7 @@ event_poll_func (GPollFD *fds, guint nfds, gint timeout)
   // tell me your compiler vendor was too incompetent to implement
   // the C standard within the last six years.
   struct info info[nfds];
-  pe_timer *w_timeout = 0;
-  int got_events = 0, got_timeout = 0;
+  int got_events = 0;
   int n;
 
   for (n = 0; n < nfds; n++)
@@ -74,35 +67,19 @@ event_poll_func (GPollFD *fds, guint nfds, gint timeout)
       GEventAPI->start ((pe_watcher *)w, 0);
     }
 
-  if (timeout >= 0)
-    {
-      w_timeout = GEventAPI->new_timer (0, 0);
-      w_timeout->base.callback = (void *)event_timer_cb;
-      w_timeout->base.ext_data = (void *)&got_timeout;
-      w_timeout->tm.at = GEventAPI->NVtime () + timeout * 0.001;
-
-      GEventAPI->start ((pe_watcher *)w_timeout, 0);
-    }
-
   do {
     PUSHMARK (SP);
-    XPUSHs (sv_2mortal (newSVnv (86400)));
+    XPUSHs (sv_2mortal (newSVnv (timeout >= 0 ? timeout * 0.001 : 86400. * 365.)));
     PUTBACK;
     call_pv ("Event::one_event", G_DISCARD | G_EVAL);
     SPAGAIN;
-  } while (!got_events && !got_timeout);
-
-  if (w_timeout)
-    GEventAPI->cancel ((pe_watcher *)w_timeout);
+  } while (timeout < 0 && !got_events);
 
   for (n = 0; n < nfds; n++)
     GEventAPI->cancel ((pe_watcher *)info[n].w);
 
   if (SvTRUE (ERRSV))
     croak (0);
-
-  if (got_timeout)
-    return 0;
 
   return got_events;
 }
